@@ -32,9 +32,12 @@ ENV/
 .pytest_cache/
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
 .tox/
 .nox/
+.hypothesis/
+.cache/
 
 # Type checkers / linters
 .mypy_cache/
@@ -48,6 +51,11 @@ htmlcov/
 .env
 .env.*
 *.local
+.python-version
+
+# Local databases
+*.sqlite3
+*.db
 
 # Logs
 *.log
