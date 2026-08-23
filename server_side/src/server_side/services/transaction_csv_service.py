@@ -10,6 +10,26 @@ class TransactionCsvError(ValueError):
     pass
 
 
+def _parse_amount(raw_amount: str, line_number: int) -> Decimal:
+    normalized = raw_amount.strip().replace(" ", "")
+
+    # Accept common formats: 34.74, 34,74, 1,234.56, 1.234,56.
+    if "," in normalized and "." in normalized:
+        if normalized.rfind(",") > normalized.rfind("."):
+            normalized = normalized.replace(".", "").replace(",", ".")
+        else:
+            normalized = normalized.replace(",", "")
+    elif "," in normalized:
+        normalized = normalized.replace(",", ".")
+
+    try:
+        return Decimal(normalized)
+    except InvalidOperation as exc:
+        raise TransactionCsvError(
+            f"Line {line_number}: invalid amount '{raw_amount}'."
+        ) from exc
+
+
 def parse_transactions_csv(csv_text: str) -> list[TransactionInsertion]:
     transactions: list[TransactionInsertion] = []
     reader = csv.reader(io.StringIO(csv_text))
@@ -25,11 +45,11 @@ def parse_transactions_csv(csv_text: str) -> list[TransactionInsertion]:
 
         date_raw, title_raw, amount_raw = [cell.strip() for cell in row]
 
-        if line_number == 1 and (date_raw, title_raw, amount_raw) == (
-            "date",
-            "title",
-            "amount",
-        ):
+        if line_number == 1 and (
+            date_raw.lower(),
+            title_raw.lower(),
+            amount_raw.lower(),
+        ) == ("date", "title", "amount"):
             continue
 
         if not title_raw:
@@ -42,12 +62,7 @@ def parse_transactions_csv(csv_text: str) -> list[TransactionInsertion]:
                 f"Line {line_number}: invalid date '{date_raw}', expected YYYY-MM-DD."
             ) from exc
 
-        try:
-            transaction_amount = Decimal(amount_raw)
-        except InvalidOperation as exc:
-            raise TransactionCsvError(
-                f"Line {line_number}: invalid amount '{amount_raw}'."
-            ) from exc
+        transaction_amount = _parse_amount(amount_raw, line_number)
 
         transactions.append(
             TransactionInsertion(

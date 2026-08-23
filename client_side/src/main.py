@@ -1,7 +1,21 @@
 import random
+import base64
+from collections import defaultdict
+from datetime import date
+from decimal import Decimal
 
-from dash import Dash, dcc, html
-from components import create_bar_figure, create_line_figure
+import requests
+from dash import Dash, Input, Output, State, dash_table, dcc, html, no_update
+from components import (
+    create_bar_figure,
+    create_line_figure,
+    create_type_month_comparison_figure,
+)
+
+
+SERVER_IMPORT_URL = "http://127.0.0.1:8000/api/v1/transactions/import-csv"
+SERVER_TRANSACTIONS_URL = "http://127.0.0.1:8000/api/v1/transactions/"
+SERVER_TITLE_MAPPINGS_URL = "http://127.0.0.1:8000/api/v1/transactions/title-mappings"
 
 
 def generate_sample_data() -> tuple[list[str], list[int], list[int]]:
@@ -11,22 +25,426 @@ def generate_sample_data() -> tuple[list[str], list[int], list[int]]:
     return labels, line_values, bar_values
 
 
-def create_app() -> Dash:
-    labels, line_values, bar_values = generate_sample_data()
-    line_fig = create_line_figure(labels, line_values)
-    bar_fig = create_bar_figure(labels, bar_values)
+def import_transactions_csv(contents: str, filename: str | None) -> tuple[bool, str]:
+    if not contents:
+        return False, "Select a CSV file to upload."
 
-    app = Dash(__name__)
-    app.layout = html.Div(
-        style={"maxWidth": "1200px", "margin": "20px auto", "padding": "0 16px"},
+    try:
+        _, content_string = contents.split(",", maxsplit=1)
+        csv_bytes = base64.b64decode(content_string)
+    except ValueError:
+        return False, "Invalid uploaded file format."
+
+    file_name = filename or "transactions.csv"
+
+    try:
+        response = requests.post(
+            SERVER_IMPORT_URL,
+            files={"file": (file_name, csv_bytes, "text/csv")},
+            timeout=15,
+        )
+    except requests.RequestException:
+        return (
+            False,
+            "Could not reach the server. Start server_side API before importing.",
+        )
+
+    if response.ok:
+        data = response.json()
+        return True, f"Imported {len(data)} transactions successfully."
+
+    detail = "Unknown import error"
+    try:
+        detail = response.json().get("detail", detail)
+    except ValueError:
+        detail = response.text or detail
+    return False, f"Import failed: {detail}"
+
+
+def monthly_expense_data() -> tuple[list[str], list[float], str | None]:
+    transactions, error = fetch_transactions()
+    if error is not None:
+        return [], [], error
+
+    by_month: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+
+    for item in transactions:
+        transaction_date = date.fromisoformat(item["date"])
+        month_key = transaction_date.strftime("%Y-%m")
+        by_month[month_key] += Decimal(str(item["amount"]))
+
+    labels = sorted(by_month.keys())
+    totals = [float(by_month[label]) for label in labels]
+    return labels, totals, None
+
+
+def fetch_transactions() -> tuple[list[dict], str | None]:
+    try:
+        response = requests.get(SERVER_TRANSACTIONS_URL, timeout=10)
+        response.raise_for_status()
+        transactions = response.json()
+    except requests.RequestException:
+        return [], "Could not load transactions from server."
+    return transactions, None
+
+
+def subtract_month(month: date) -> date:
+    if month.month == 1:
+        return date(month.year - 1, 12, 1)
+    return date(month.year, month.month - 1, 1)
+
+
+def last_six_month_labels(transactions: list[dict]) -> list[str]:
+    if transactions:
+        most_recent = max(date.fromisoformat(t["date"]) for t in transactions)
+        cursor = date(most_recent.year, most_recent.month, 1)
+    else:
+        today = date.today()
+        cursor = date(today.year, today.month, 1)
+
+    months: list[date] = []
+    for _ in range(6):
+        months.append(cursor)
+        cursor = subtract_month(cursor)
+
+    months.reverse()
+    return [m.strftime("%Y-%m") for m in months]
+
+
+def type_month_spent_figure(
+    transactions: list[dict],
+    selected_types: list[str],
+) -> tuple[object, list[str]]:
+    month_labels = last_six_month_labels(transactions)
+    available_types = sorted(
+        {
+            str(item.get("type", "")).strip()
+            for item in transactions
+            if str(item.get("type", "")).strip()
+        }
+    )
+
+    active_types = [transaction_type for transaction_type in selected_types if transaction_type in available_types]
+    if not active_types:
+        active_types = available_types
+
+    values_by_type: dict[str, list[float]] = {
+        transaction_type: [0.0 for _ in month_labels]
+        for transaction_type in active_types
+    }
+
+    month_index = {label: idx for idx, label in enumerate(month_labels)}
+    for item in transactions:
+        transaction_type = str(item.get("type", "")).strip()
+        if transaction_type not in active_types:
+            continue
+
+        transaction_date = date.fromisoformat(item["date"])
+        month_key = transaction_date.strftime("%Y-%m")
+        if month_key not in month_index:
+            continue
+
+        amount = Decimal(str(item.get("amount", 0)))
+        spent_amount = float(amount if amount > 0 else Decimal("0"))
+        values_by_type[transaction_type][month_index[month_key]] += spent_amount
+
+    figure = create_type_month_comparison_figure(month_labels, active_types, values_by_type)
+    return figure, available_types
+
+
+def fetch_title_mappings() -> tuple[list[dict[str, str]], str | None]:
+    try:
+        response = requests.get(SERVER_TITLE_MAPPINGS_URL, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException:
+        return [], "Could not load title mappings from server."
+
+    rows = response.json()
+    normalized_rows = [
+        {
+            "title": str(item.get("title", "")).strip(),
+            "type": str(item.get("type") or "").strip(),
+        }
+        for item in rows
+    ]
+    return normalized_rows, None
+
+
+def submit_title_mappings(rows: list[dict[str, str]] | None) -> tuple[bool, str, list[dict[str, str]]]:
+    if rows is None:
+        return False, "No rows to save.", []
+
+    payload = {
+        "mappings": [
+            {
+                "title": str(row.get("title", "")).strip(),
+                "type": str(row.get("type", "")).strip() or None,
+            }
+            for row in rows
+            if str(row.get("title", "")).strip()
+        ]
+    }
+
+    try:
+        response = requests.post(SERVER_TITLE_MAPPINGS_URL, json=payload, timeout=12)
+        response.raise_for_status()
+    except requests.RequestException:
+        return False, "Could not save mappings to server.", rows
+
+    saved_rows = [
+        {
+            "title": str(item.get("title", "")).strip(),
+            "type": str(item.get("type") or "").strip(),
+        }
+        for item in response.json()
+    ]
+    return True, "Type mappings saved.", saved_rows
+
+
+def data_provision_layout() -> html.Div:
+    mapping_rows, mapping_error = fetch_title_mappings()
+
+    status_text = mapping_error or "Unmapped titles appear first. Fill the type and click Submit."
+    status_color = "#9b1c1c" if mapping_error else "#2b4c7e"
+
+    return html.Div(
         children=[
-            html.H1("Financeinator Client Dashboard"),
+            html.H2("Data Provision"),
+            html.P("Upload a CSV with columns: date,title,amount."),
+            dcc.Upload(
+                id="transaction-upload",
+                children=html.Div("Drop CSV here or click to choose file"),
+                multiple=False,
+                style={
+                    "width": "100%",
+                    "height": "110px",
+                    "lineHeight": "110px",
+                    "borderWidth": "2px",
+                    "borderStyle": "dashed",
+                    "borderRadius": "14px",
+                    "textAlign": "center",
+                    "background": "#f8fbff",
+                    "borderColor": "#9ebbe8",
+                    "color": "#2b4c7e",
+                    "fontWeight": "600",
+                },
+            ),
+            html.Div(id="upload-result", style={"marginTop": "14px"}),
+            html.Hr(style={"margin": "22px 0"}),
+            html.H3("Transaction Title Type Mapping"),
+            html.P(
+                status_text,
+                style={"marginBottom": "10px", "color": status_color, "fontWeight": "600"},
+            ),
+            dash_table.DataTable(
+                id="title-mapping-table",
+                columns=[
+                    {"name": "Title", "id": "title", "editable": False},
+                    {"name": "Type", "id": "type", "editable": True},
+                ],
+                data=mapping_rows,
+                editable=True,
+                page_size=12,
+                style_cell={
+                    "padding": "8px",
+                    "fontFamily": "Segoe UI",
+                    "fontSize": "14px",
+                    "textAlign": "left",
+                },
+                style_header={"fontWeight": "700", "backgroundColor": "#f2f7ff"},
+                style_table={"border": "1px solid #d9e2f2", "borderRadius": "8px", "overflow": "hidden"},
+            ),
+            html.Button(
+                "Submit Mapping",
+                id="submit-title-mapping",
+                n_clicks=0,
+                style={
+                    "marginTop": "12px",
+                    "padding": "10px 14px",
+                    "border": "1px solid #2b4c7e",
+                    "borderRadius": "8px",
+                    "background": "#2b4c7e",
+                    "color": "#ffffff",
+                    "fontWeight": "600",
+                    "cursor": "pointer",
+                },
+            ),
+            html.Div(id="title-mapping-result", style={"marginTop": "12px"}),
+        ]
+    )
+
+
+def data_analysis_layout() -> html.Div:
+    labels, monthly_totals, load_error = monthly_expense_data()
+    transactions, transaction_error = fetch_transactions()
+    default_type_figure, available_types = type_month_spent_figure(transactions, [])
+
+    if not labels:
+        labels, line_values, bar_values = generate_sample_data()
+        line_fig = create_line_figure(labels, line_values)
+        bar_fig = create_bar_figure(labels, bar_values)
+        message = load_error or "No transactions found yet. Showing sample data."
+        alert = html.Div(
+            message,
+            style={
+                "marginBottom": "10px",
+                "padding": "10px 12px",
+                "borderRadius": "10px",
+                "border": "1px solid #b08900",
+                "color": "#7a5d00",
+                "background": "#fff9e6",
+                "fontWeight": "600",
+            },
+        )
+    else:
+        line_fig = create_line_figure(labels, monthly_totals)
+        bar_fig = create_bar_figure(labels, monthly_totals)
+        alert = html.Div(
+            "Monthly totals loaded from transactions.",
+            style={
+                "marginBottom": "10px",
+                "padding": "10px 12px",
+                "borderRadius": "10px",
+                "border": "1px solid #1f7a3d",
+                "color": "#1f7a3d",
+                "background": "#eaf7ef",
+                "fontWeight": "600",
+            },
+        )
+
+    return html.Div(
+        children=[
+            html.H2("Data Analysis"),
+            alert,
             html.Div(
                 style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "16px"},
                 children=[dcc.Graph(figure=line_fig), dcc.Graph(figure=bar_fig)],
             ),
+            html.Hr(style={"margin": "22px 0"}),
+            html.H3("Monthly Type Comparison (Last 6 Months)"),
+            html.P(
+                transaction_error or "Select or unselect types to filter the comparison chart.",
+                style={
+                    "marginBottom": "10px",
+                    "color": "#9b1c1c" if transaction_error else "#2b4c7e",
+                    "fontWeight": "600",
+                },
+            ),
+            dcc.Dropdown(
+                id="type-filter",
+                options=[{"label": transaction_type, "value": transaction_type} for transaction_type in available_types],
+                value=available_types,
+                multi=True,
+                placeholder="Select transaction types",
+                style={"marginBottom": "12px"},
+            ),
+            dcc.Graph(id="type-month-graph", figure=default_type_figure),
+        ]
+    )
+
+
+def create_app() -> Dash:
+    app = Dash(__name__, suppress_callback_exceptions=True)
+    app.layout = html.Div(
+        style={"maxWidth": "1200px", "margin": "20px auto", "padding": "0 16px 24px"},
+        children=[
+            html.H1("Financeinator Client Dashboard"),
+            dcc.Tabs(
+                id="top-menu",
+                value="data-provision",
+                children=[
+                    dcc.Tab(label="Data Provision", value="data-provision"),
+                    dcc.Tab(label="Data Analysis", value="data-analysis"),
+                ],
+            ),
+            html.Div(
+                id="screen-content",
+                style={"marginTop": "18px"},
+            ),
         ],
     )
+
+    @app.callback(Output("screen-content", "children"), Input("top-menu", "value"))
+    def render_screen(active_screen: str) -> html.Div:
+        if active_screen == "data-analysis":
+            return data_analysis_layout()
+        return data_provision_layout()
+
+    @app.callback(
+        Output("upload-result", "children"),
+        Output("title-mapping-table", "data"),
+        Input("transaction-upload", "contents"),
+        State("transaction-upload", "filename"),
+        prevent_initial_call=True,
+    )
+    def upload_csv(contents: str | None, filename: str | None) -> tuple[html.Div, list[dict[str, str]] | object]:
+        if contents is None:
+            return no_update, no_update
+
+        success, message = import_transactions_csv(contents, filename)
+        color = "#1f7a3d" if success else "#9b1c1c"
+        background = "#eaf7ef" if success else "#fdecef"
+
+        mapping_rows, _ = fetch_title_mappings()
+
+        return (
+            html.Div(
+                message,
+                style={
+                    "padding": "10px 12px",
+                    "borderRadius": "10px",
+                    "border": f"1px solid {color}",
+                    "color": color,
+                    "background": background,
+                    "fontWeight": "600",
+                },
+            ),
+            mapping_rows,
+        )
+
+    @app.callback(
+        Output("title-mapping-result", "children"),
+        Output("title-mapping-table", "data", allow_duplicate=True),
+        Input("submit-title-mapping", "n_clicks"),
+        State("title-mapping-table", "data"),
+        prevent_initial_call=True,
+    )
+    def submit_mapping(
+        n_clicks: int,
+        rows: list[dict[str, str]] | None,
+    ) -> tuple[html.Div | object, list[dict[str, str]] | object]:
+        if not n_clicks:
+            return no_update, no_update
+
+        success, message, saved_rows = submit_title_mappings(rows)
+        color = "#1f7a3d" if success else "#9b1c1c"
+        background = "#eaf7ef" if success else "#fdecef"
+
+        return (
+            html.Div(
+                message,
+                style={
+                    "padding": "10px 12px",
+                    "borderRadius": "10px",
+                    "border": f"1px solid {color}",
+                    "color": color,
+                    "background": background,
+                    "fontWeight": "600",
+                },
+            ),
+            saved_rows if success else no_update,
+        )
+
+    @app.callback(
+        Output("type-month-graph", "figure"),
+        Input("type-filter", "value"),
+        prevent_initial_call=True,
+    )
+    def refresh_type_month_graph(selected_types: list[str] | None):
+        transactions, _ = fetch_transactions()
+        figure, _ = type_month_spent_figure(transactions, selected_types or [])
+        return figure
+
     return app
 
 

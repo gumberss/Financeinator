@@ -1,7 +1,7 @@
 import plotly.graph_objects as go
 
 
-def create_line_figure(labels: list[str], values: list[int]) -> go.Figure:
+def create_line_figure(labels: list[str], values: list[float]) -> go.Figure:
     line_fig = go.Figure(
         data=[
             go.Scatter(
@@ -18,7 +18,7 @@ def create_line_figure(labels: list[str], values: list[int]) -> go.Figure:
     return line_fig
 
 
-def create_bar_figure(labels: list[str], values: list[int]) -> go.Figure:
+def create_bar_figure(labels: list[str], values: list[float]) -> go.Figure:
     bar_fig = go.Figure(
         data=[
             go.Bar(
@@ -39,3 +39,32 @@ def create_bar_figure(labels: list[str], values: list[int]) -> go.Figure:
         barcornerradius=5,
     )
     return bar_fig
+
+
+def create_type_month_comparison_figure(
+    month_labels: list[str],
+    types: list[str],
+    values_by_type: dict[str, list[float]],
+) -> go.Figure:
+    fig = go.Figure()
+
+    for transaction_type in types:
+        fig.add_trace(
+            go.Bar(
+                x=month_labels,
+                y=values_by_type.get(transaction_type, [0.0] * len(month_labels)),
+                name=transaction_type,
+            )
+        )
+
+    fig.update_layout(
+        title="Spent by Type per Month (Last 6 Months)",
+        template="plotly_white",
+        barmode="group",
+        bargap=0.22,
+        barcornerradius=5,
+        legend_title_text="Type",
+        yaxis_title="Amount",
+        xaxis_title="Month",
+    )
+    return fig
