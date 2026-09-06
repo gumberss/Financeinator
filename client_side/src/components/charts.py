@@ -50,21 +50,51 @@ def create_type_month_comparison_figure(
 
     for transaction_type in types:
         fig.add_trace(
-            go.Bar(
+            go.Scatter(
                 x=month_labels,
                 y=values_by_type.get(transaction_type, [0.0] * len(month_labels)),
+                mode="lines+markers",
                 name=transaction_type,
+                line={"shape": "spline", "smoothing": 0.3, "width": 2},
+                marker={"size": 7},
             )
         )
 
     fig.update_layout(
         title="Spent by Type per Month (Last 6 Months)",
         template="plotly_white",
-        barmode="group",
-        bargap=0.22,
-        barcornerradius=5,
         legend_title_text="Type",
         yaxis_title="Amount",
         xaxis_title="Month",
+    )
+    return fig
+
+
+def create_daily_month_comparison_figure(
+    day_labels: list[int],
+    month_labels: list[str],
+    values_by_month: dict[str, list[float]],
+) -> go.Figure:
+    fig = go.Figure()
+
+    for month_label in month_labels:
+        fig.add_trace(
+            go.Scatter(
+                x=day_labels,
+                y=values_by_month.get(month_label, [0.0] * len(day_labels)),
+                mode="lines+markers",
+                name=month_label,
+                line={"shape": "spline", "smoothing": 0.3, "width": 2},
+                marker={"size": 5},
+            )
+        )
+
+    fig.update_layout(
+        title="Daily Spend Comparison (Last 6 Months)",
+        template="plotly_white",
+        legend_title_text="Month",
+        xaxis_title="Day of Month",
+        yaxis_title="Amount Spent",
+        xaxis={"dtick": 1, "range": [0.5, 31.5]},
     )
     return fig

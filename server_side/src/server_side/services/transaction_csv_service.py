@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import io
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -8,6 +9,10 @@ from server_side.models.transaction import TransactionInsertion
 
 class TransactionCsvError(ValueError):
     pass
+
+
+def hash_csv_content(csv_bytes: bytes) -> str:
+    return hashlib.sha256(csv_bytes).hexdigest()
 
 
 def _parse_amount(raw_amount: str, line_number: int) -> Decimal:

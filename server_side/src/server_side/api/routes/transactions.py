@@ -1,5 +1,8 @@
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
+from server_side.repositories.imported_csv_file_repository import (
+    imported_csv_file_repository,
+)
 from server_side.repositories.transaction_repository import transaction_repository
 from server_side.repositories.title_type_mapping_repository import (
     title_type_mapping_repository,
@@ -11,6 +14,7 @@ from server_side.schemas.title_mapping import (
 from server_side.schemas.transaction import TransactionResponse
 from server_side.services.transaction_csv_service import (
     TransactionCsvError,
+    hash_csv_content,
     parse_transactions_csv,
 )
 
@@ -78,8 +82,14 @@ def list_transactions() -> list[TransactionResponse]:
 
 @router.post("/import-csv", response_model=list[TransactionResponse])
 async def import_transactions_csv(file: UploadFile = File(...)) -> list[TransactionResponse]:
+    raw_bytes = await file.read()
+    file_hash = hash_csv_content(raw_bytes)
+
+    if imported_csv_file_repository.exists(file_hash):
+        raise HTTPException(status_code=409, detail="This CSV file has already been imported.")
+
     try:
-        csv_text = (await file.read()).decode("utf-8-sig")
+        csv_text = raw_bytes.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded.") from exc
 
@@ -92,6 +102,7 @@ async def import_transactions_csv(file: UploadFile = File(...)) -> list[Transact
         transaction_insertions,
         transaction_type="purchase",
     )
+    imported_csv_file_repository.add(file_hash)
 
     visible_transactions = [
         t for t in transactions if _is_visible_to_client(_effective_type(t))

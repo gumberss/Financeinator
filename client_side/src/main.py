@@ -8,14 +8,15 @@ import requests
 from dash import Dash, Input, Output, State, dash_table, dcc, html, no_update
 from components import (
     create_bar_figure,
+    create_daily_month_comparison_figure,
     create_line_figure,
     create_type_month_comparison_figure,
 )
 
 
-SERVER_IMPORT_URL = "http://127.0.0.1:8000/api/v1/transactions/import-csv"
-SERVER_TRANSACTIONS_URL = "http://127.0.0.1:8000/api/v1/transactions/"
-SERVER_TITLE_MAPPINGS_URL = "http://127.0.0.1:8000/api/v1/transactions/title-mappings"
+SERVER_IMPORT_URL = "http://127.0.0.1:8100/api/v1/transactions/import-csv"
+SERVER_TRANSACTIONS_URL = "http://127.0.0.1:8100/api/v1/transactions/"
+SERVER_TITLE_MAPPINGS_URL = "http://127.0.0.1:8100/api/v1/transactions/title-mappings"
 
 
 def generate_sample_data() -> tuple[list[str], list[int], list[int]]:
@@ -94,7 +95,7 @@ def subtract_month(month: date) -> date:
     return date(month.year, month.month - 1, 1)
 
 
-def last_six_month_labels(transactions: list[dict]) -> list[str]:
+def last_n_month_labels(transactions: list[dict], count: int) -> list[str]:
     if transactions:
         most_recent = max(date.fromisoformat(t["date"]) for t in transactions)
         cursor = date(most_recent.year, most_recent.month, 1)
@@ -103,12 +104,37 @@ def last_six_month_labels(transactions: list[dict]) -> list[str]:
         cursor = date(today.year, today.month, 1)
 
     months: list[date] = []
-    for _ in range(6):
+    for _ in range(count):
         months.append(cursor)
         cursor = subtract_month(cursor)
 
     months.reverse()
     return [m.strftime("%Y-%m") for m in months]
+
+
+def last_six_month_labels(transactions: list[dict]) -> list[str]:
+    return last_n_month_labels(transactions, 6)
+
+
+def daily_month_spent_figure(transactions: list[dict]) -> object:
+    month_labels = last_n_month_labels(transactions, 6)
+    day_labels = list(range(1, 32))
+
+    values_by_month: dict[str, list[float]] = {
+        month_label: [0.0 for _ in day_labels] for month_label in month_labels
+    }
+
+    for item in transactions:
+        transaction_date = date.fromisoformat(item["date"])
+        month_key = transaction_date.strftime("%Y-%m")
+        if month_key not in values_by_month:
+            continue
+
+        amount = Decimal(str(item.get("amount", 0)))
+        spent_amount = float(amount if amount > 0 else Decimal("0"))
+        values_by_month[month_key][transaction_date.day - 1] += spent_amount
+
+    return create_daily_month_comparison_figure(day_labels, month_labels, values_by_month)
 
 
 def type_month_spent_figure(
@@ -278,6 +304,7 @@ def data_analysis_layout() -> html.Div:
     labels, monthly_totals, load_error = monthly_expense_data()
     transactions, transaction_error = fetch_transactions()
     default_type_figure, available_types = type_month_spent_figure(transactions, [])
+    daily_month_figure = daily_month_spent_figure(transactions)
 
     if not labels:
         labels, line_values, bar_values = generate_sample_data()
@@ -339,6 +366,9 @@ def data_analysis_layout() -> html.Div:
                 style={"marginBottom": "12px"},
             ),
             dcc.Graph(id="type-month-graph", figure=default_type_figure),
+            html.Hr(style={"margin": "22px 0"}),
+            html.H3("Daily Spend Comparison (Last 6 Months)"),
+            dcc.Graph(id="daily-month-graph", figure=daily_month_figure),
         ]
     )
 
@@ -450,7 +480,7 @@ def create_app() -> Dash:
 
 def run() -> None:
     app = create_app()
-    app.run(host="127.0.0.1", port=8050, debug=False)
+    app.run(host="127.0.0.1", port=8150, debug=False)
 
 
 if __name__ == "__main__":
