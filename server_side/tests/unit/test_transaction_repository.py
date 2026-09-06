@@ -46,9 +46,13 @@ def test_insert_many_marks_pagamento_recebido_as_card_payment() -> None:
     assert inserted[0].type == "card payment"
 
 
-def test_insert_many_uses_title_type_mapping() -> None:
+def test_insert_many_uses_title_type_mapping(monkeypatch) -> None:
     repository = TransactionRepository()
-    title_type_mapping_repository.set_mapping("Coffee", "food")
+    monkeypatch.setattr(
+        title_type_mapping_repository,
+        "get_mapping",
+        lambda title: "food" if title == "Coffee" else None,
+    )
 
     inserted = repository.insert_many(
         [
@@ -62,4 +66,3 @@ def test_insert_many_uses_title_type_mapping() -> None:
     )
 
     assert inserted[0].type == "food"
-    title_type_mapping_repository.set_mapping("Coffee", "")

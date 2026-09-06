@@ -52,7 +52,8 @@ def import_transactions_csv(contents: str, filename: str | None) -> tuple[bool, 
 
     if response.ok:
         data = response.json()
-        return True, f"Imported {len(data)} transactions successfully."
+        message = data.get("message") or "File accepted for import."
+        return True, message
 
     detail = "Unknown import error"
     try:

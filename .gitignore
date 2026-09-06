@@ -57,6 +57,9 @@ htmlcov/
 *.sqlite3
 *.db
 
+# Local persisted repository data
+server_side/src/server_side/repositories/mappings.json
+
 # Logs
 *.log
 

@@ -1,5 +1,9 @@
-from fastapi import APIRouter, File, HTTPException, UploadFile
+import logging
 
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+
+from server_side.clients.llm.item_categorization_service import ItemCategorizationError
+from server_side.models.transaction import TransactionInsertion
 from server_side.repositories.imported_csv_file_repository import (
     imported_csv_file_repository,
 )
@@ -11,12 +15,15 @@ from server_side.schemas.title_mapping import (
     TitleTypeMappingItem,
     TitleTypeMappingUpdateRequest,
 )
-from server_side.schemas.transaction import TransactionResponse
+from server_side.schemas.transaction import ImportAcceptedResponse, TransactionResponse
+from server_side.services.title_categorization_service import ensure_title_mappings
 from server_side.services.transaction_csv_service import (
     TransactionCsvError,
     hash_csv_content,
     parse_transactions_csv,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -80,8 +87,10 @@ def list_transactions() -> list[TransactionResponse]:
     ]
 
 
-@router.post("/import-csv", response_model=list[TransactionResponse])
-async def import_transactions_csv(file: UploadFile = File(...)) -> list[TransactionResponse]:
+@router.post("/import-csv", response_model=ImportAcceptedResponse, status_code=202)
+async def import_transactions_csv(
+    background_tasks: BackgroundTasks, file: UploadFile = File(...)
+) -> ImportAcceptedResponse:
     raw_bytes = await file.read()
     file_hash = hash_csv_content(raw_bytes)
 
@@ -98,17 +107,25 @@ async def import_transactions_csv(file: UploadFile = File(...)) -> list[Transact
     except TransactionCsvError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    transactions = transaction_repository.insert_many(
+    background_tasks.add_task(_import_transactions_in_background, transaction_insertions, file_hash)
+
+    return ImportAcceptedResponse(
+        status="accepted",
+        message="File accepted. Transactions are being imported in the background.",
+    )
+
+
+def _import_transactions_in_background(
+    transaction_insertions: list[TransactionInsertion], file_hash: str
+) -> None:
+    try:
+        ensure_title_mappings(transaction_insertions)
+    except ItemCategorizationError:
+        logger.exception("Failed to categorize invoice items for background CSV import.")
+        return
+
+    transaction_repository.insert_many(
         transaction_insertions,
         transaction_type="purchase",
     )
     imported_csv_file_repository.add(file_hash)
-
-    visible_transactions = [
-        t for t in transactions if _is_visible_to_client(_effective_type(t))
-    ]
-
-    return [
-        _to_response(t)
-        for t in visible_transactions
-    ]

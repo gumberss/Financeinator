@@ -50,19 +50,19 @@ def create_type_month_comparison_figure(
 
     for transaction_type in types:
         fig.add_trace(
-            go.Scatter(
+            go.Bar(
                 x=month_labels,
                 y=values_by_type.get(transaction_type, [0.0] * len(month_labels)),
-                mode="lines+markers",
                 name=transaction_type,
-                line={"shape": "spline", "smoothing": 0.3, "width": 2},
-                marker={"size": 7},
             )
         )
 
     fig.update_layout(
         title="Spent by Type per Month (Last 6 Months)",
         template="plotly_white",
+        barmode="group",
+        bargap=0.22,
+        barcornerradius=5,
         legend_title_text="Type",
         yaxis_title="Amount",
         xaxis_title="Month",

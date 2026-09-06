@@ -16,3 +16,8 @@ class TransactionResponse(BaseModel):
     title: str
     amount: Decimal
     type: str
+
+
+class ImportAcceptedResponse(BaseModel):
+    status: str
+    message: str
