@@ -138,6 +138,62 @@ def daily_month_spent_figure(transactions: list[dict]) -> object:
     return create_daily_month_comparison_figure(day_labels, month_labels, values_by_month)
 
 
+def invoice_items_by_category(transactions: list[dict], category: str | None) -> list[dict[str, str]]:
+    month_labels = set(last_n_month_labels(transactions, 6))
+
+    rows = [
+        item
+        for item in transactions
+        if date.fromisoformat(item["date"]).strftime("%Y-%m") in month_labels
+        and (category is None or str(item.get("type", "")).strip() == category)
+    ]
+    rows.sort(key=lambda item: item["date"], reverse=True)
+
+    return [
+        {
+            "date": item["date"],
+            "title": item["title"],
+            "amount": f"{Decimal(str(item.get('amount', 0))):.2f}",
+            "type": str(item.get("type", "")).strip(),
+        }
+        for item in rows
+    ]
+
+
+def title_month_spend_matrix(
+    transactions: list[dict],
+    category: str | None,
+) -> tuple[list[str], list[dict[str, str]]]:
+    month_labels = last_n_month_labels(transactions, 6)
+    month_index = set(month_labels)
+
+    totals: dict[str, dict[str, Decimal]] = defaultdict(lambda: defaultdict(lambda: Decimal("0")))
+
+    for item in transactions:
+        if category is not None and str(item.get("type", "")).strip() != category:
+            continue
+
+        transaction_date = date.fromisoformat(item["date"])
+        month_key = transaction_date.strftime("%Y-%m")
+        if month_key not in month_index:
+            continue
+
+        amount = Decimal(str(item.get("amount", 0)))
+        spent_amount = amount if amount > 0 else Decimal("0")
+        totals[item["title"].strip()][month_key] += spent_amount
+
+    rows = []
+    for title, month_totals in totals.items():
+        row = {"title": title}
+        for month_label in month_labels:
+            row[month_label] = f"{month_totals.get(month_label, Decimal('0')):.2f}"
+        rows.append(row)
+
+    rows.sort(key=lambda row: row["title"].lower())
+
+    return month_labels, rows
+
+
 def type_month_spent_figure(
     transactions: list[dict],
     selected_types: list[str],
@@ -370,6 +426,67 @@ def data_analysis_layout() -> html.Div:
             html.Hr(style={"margin": "22px 0"}),
             html.H3("Daily Spend Comparison (Last 6 Months)"),
             dcc.Graph(id="daily-month-graph", figure=daily_month_figure),
+            html.Hr(style={"margin": "22px 0"}),
+            html.H3("Invoice Items by Category (Last 6 Months)"),
+            dcc.Dropdown(
+                id="invoice-items-category-filter",
+                options=[{"label": transaction_type, "value": transaction_type} for transaction_type in available_types],
+                value=available_types[0] if available_types else None,
+                placeholder="Select a category",
+                style={"marginBottom": "12px"},
+            ),
+            dash_table.DataTable(
+                id="invoice-items-table",
+                columns=[
+                    {"name": "Date", "id": "date"},
+                    {"name": "Title", "id": "title"},
+                    {"name": "Amount", "id": "amount"},
+                    {"name": "Type", "id": "type"},
+                ],
+                data=invoice_items_by_category(transactions, available_types[0] if available_types else None),
+                page_size=18,
+                style_cell={
+                    "padding": "8px",
+                    "fontFamily": "Segoe UI",
+                    "fontSize": "14px",
+                    "textAlign": "left",
+                },
+                style_header={"fontWeight": "700", "backgroundColor": "#f2f7ff"},
+                style_table={"border": "1px solid #d9e2f2", "borderRadius": "8px", "overflow": "hidden"},
+            ),
+            html.Hr(style={"margin": "22px 0"}),
+            html.H3("Title Spend by Month (Category)"),
+            html.P(
+                "Compare how much you spent on each title, month by month, for the selected category.",
+                style={"marginBottom": "10px", "color": "#2b4c7e", "fontWeight": "600"},
+            ),
+            dcc.Dropdown(
+                id="title-month-category-filter",
+                options=[{"label": transaction_type, "value": transaction_type} for transaction_type in available_types],
+                value=available_types[0] if available_types else None,
+                placeholder="Select a category",
+                style={"marginBottom": "12px"},
+            ),
+            dash_table.DataTable(
+                id="title-month-matrix-table",
+                columns=(
+                    [{"name": "Title", "id": "title"}]
+                    + [
+                        {"name": month_label, "id": month_label}
+                        for month_label in title_month_spend_matrix(transactions, available_types[0] if available_types else None)[0]
+                    ]
+                ),
+                data=title_month_spend_matrix(transactions, available_types[0] if available_types else None)[1],
+                page_size=18,
+                style_cell={
+                    "padding": "8px",
+                    "fontFamily": "Segoe UI",
+                    "fontSize": "14px",
+                    "textAlign": "left",
+                },
+                style_header={"fontWeight": "700", "backgroundColor": "#f2f7ff"},
+                style_table={"border": "1px solid #d9e2f2", "borderRadius": "8px", "overflow": "hidden"},
+            ),
         ]
     )
 
@@ -475,6 +592,29 @@ def create_app() -> Dash:
         transactions, _ = fetch_transactions()
         figure, _ = type_month_spent_figure(transactions, selected_types or [])
         return figure
+
+    @app.callback(
+        Output("invoice-items-table", "data"),
+        Input("invoice-items-category-filter", "value"),
+        prevent_initial_call=True,
+    )
+    def refresh_invoice_items_table(selected_category: str | None):
+        transactions, _ = fetch_transactions()
+        return invoice_items_by_category(transactions, selected_category)
+
+    @app.callback(
+        Output("title-month-matrix-table", "columns"),
+        Output("title-month-matrix-table", "data"),
+        Input("title-month-category-filter", "value"),
+        prevent_initial_call=True,
+    )
+    def refresh_title_month_matrix_table(selected_category: str | None):
+        transactions, _ = fetch_transactions()
+        month_labels, rows = title_month_spend_matrix(transactions, selected_category)
+        columns = [{"name": "Title", "id": "title"}] + [
+            {"name": month_label, "id": month_label} for month_label in month_labels
+        ]
+        return columns, rows
 
     return app
 
