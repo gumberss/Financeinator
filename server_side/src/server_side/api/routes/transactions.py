@@ -3,6 +3,9 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 
 from server_side.clients.llm.item_categorization_service import ItemCategorizationError
+from server_side.clients.llm.merchant_identification_service import (
+    MerchantIdentificationError,
+)
 from server_side.models.transaction import TransactionInsertion
 from server_side.repositories.imported_csv_file_repository import (
     imported_csv_file_repository,
@@ -47,6 +50,7 @@ def _to_response(transaction) -> TransactionResponse:
         title=transaction.title,
         amount=transaction.amount,
         type=effective_type,
+        merchant=title_type_mapping_repository.get_merchant(transaction.title),
     )
 
 
@@ -58,6 +62,7 @@ def list_title_mappings() -> list[TitleTypeMappingItem]:
         TitleTypeMappingItem(
             title=title,
             type=title_type_mapping_repository.get_mapping(title),
+            merchant=title_type_mapping_repository.get_merchant(title),
         )
         for title in distinct_titles
     ]
@@ -70,6 +75,9 @@ def list_title_mappings() -> list[TitleTypeMappingItem]:
 def save_title_mappings(payload: TitleTypeMappingUpdateRequest) -> list[TitleTypeMappingItem]:
     title_type_mapping_repository.set_many(
         [(item.title, item.type or "") for item in payload.mappings]
+    )
+    title_type_mapping_repository.set_many_merchants(
+        [(item.title, item.merchant or "") for item in payload.mappings]
     )
     return list_title_mappings()
 
@@ -120,7 +128,7 @@ def _import_transactions_in_background(
 ) -> None:
     try:
         ensure_title_mappings(transaction_insertions)
-    except ItemCategorizationError:
+    except (ItemCategorizationError, MerchantIdentificationError):
         logger.exception("Failed to categorize invoice items for background CSV import.")
         return
 

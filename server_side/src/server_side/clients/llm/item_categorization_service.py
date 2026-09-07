@@ -6,7 +6,7 @@ from server_side.core.config import settings
 
 _PROMPT_FILE = Path(__file__).resolve().parents[4] / "ai_prompts" / "invoice_item_categorization.md"
 
-_REASONING_EFFORT = "low"
+_REASONING_EFFORT = "medium"
 
 
 class ItemCategorizationError(RuntimeError):

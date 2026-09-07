@@ -16,6 +16,7 @@ class TransactionResponse(BaseModel):
     title: str
     amount: Decimal
     type: str
+    merchant: str | None = None
 
 
 class ImportAcceptedResponse(BaseModel):
