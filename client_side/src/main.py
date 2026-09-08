@@ -556,7 +556,7 @@ def create_app() -> Dash:
             html.H1("Financeinator Client Dashboard"),
             dcc.Tabs(
                 id="top-menu",
-                value="data-provision",
+                value="data-analysis",
                 children=[
                     dcc.Tab(label="Data Provision", value="data-provision"),
                     dcc.Tab(label="Data Analysis", value="data-analysis"),
