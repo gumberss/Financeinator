@@ -9,6 +9,7 @@ from dash import Dash, Input, Output, State, dash_table, dcc, html, no_update
 from components import (
     create_bar_figure,
     create_daily_month_comparison_figure,
+    create_donut_figure,
     create_line_figure,
     create_type_month_comparison_figure,
 )
@@ -117,8 +118,12 @@ def last_six_month_labels(transactions: list[dict]) -> list[str]:
     return last_n_month_labels(transactions, 6)
 
 
-def daily_month_spent_figure(transactions: list[dict]) -> object:
-    month_labels = last_n_month_labels(transactions, 6)
+def month_window_label(month_count: int) -> str:
+    return f"Last {month_count} Month{'s' if month_count != 1 else ''}"
+
+
+def daily_month_spent_figure(transactions: list[dict], month_count: int) -> object:
+    month_labels = last_n_month_labels(transactions, month_count)
     day_labels = list(range(1, 32))
 
     values_by_month: dict[str, list[float]] = {
@@ -135,15 +140,52 @@ def daily_month_spent_figure(transactions: list[dict]) -> object:
         spent_amount = float(amount if amount > 0 else Decimal("0"))
         values_by_month[month_key][transaction_date.day - 1] += spent_amount
 
-    return create_daily_month_comparison_figure(day_labels, month_labels, values_by_month)
+    return create_daily_month_comparison_figure(day_labels, month_labels, values_by_month, month_count)
+
+
+def top_spend_donut_figure(
+    transactions: list[dict],
+    group_key: str,
+    top_count: int,
+    title: str,
+    month_count: int,
+) -> object:
+    month_labels = set(last_n_month_labels(transactions, month_count))
+    totals_by_group: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+
+    for item in transactions:
+        transaction_date = date.fromisoformat(item["date"])
+        if transaction_date.strftime("%Y-%m") not in month_labels:
+            continue
+
+        amount = Decimal(str(item.get("amount", 0)))
+        if amount <= 0:
+            continue
+
+        group = str(item.get(group_key, "")).strip() or "Unmapped"
+        totals_by_group[group] += amount
+
+    ordered_totals = sorted(totals_by_group.items(), key=lambda item: item[1], reverse=True)
+    top_totals = ordered_totals[:top_count]
+    others_total = sum((total for _, total in ordered_totals[top_count:]), Decimal("0"))
+
+    labels = [label for label, _ in top_totals]
+    values = [float(total) for _, total in top_totals]
+
+    if others_total > 0:
+        labels.append("Others")
+        values.append(float(others_total))
+
+    return create_donut_figure(labels, values, title)
 
 
 def invoice_items_by_category(
     transactions: list[dict],
     category: str | None,
     merchant: str | None = None,
+    month_count: int = 6,
 ) -> list[dict[str, str]]:
-    month_labels = set(last_n_month_labels(transactions, 6))
+    month_labels = set(last_n_month_labels(transactions, month_count))
 
     rows = [
         item
@@ -166,12 +208,19 @@ def invoice_items_by_category(
     ]
 
 
-def distinct_merchants(transactions: list[dict], category: str | None = None) -> list[str]:
+def distinct_merchants(
+    transactions: list[dict],
+    category: str | None = None,
+    month_count: int = 6,
+) -> list[str]:
+    month_labels = set(last_n_month_labels(transactions, month_count))
+
     return sorted(
         {
             str(item.get("merchant", "")).strip()
             for item in transactions
             if str(item.get("merchant", "")).strip()
+            and date.fromisoformat(item["date"]).strftime("%Y-%m") in month_labels
             and (category is None or str(item.get("type", "")).strip() == category)
         }
     )
@@ -180,8 +229,9 @@ def distinct_merchants(transactions: list[dict], category: str | None = None) ->
 def type_month_spent_figure(
     transactions: list[dict],
     selected_types: list[str],
+    month_count: int,
 ) -> tuple[object, list[str]]:
-    month_labels = last_six_month_labels(transactions)
+    month_labels = last_n_month_labels(transactions, month_count)
     available_types = sorted(
         {
             str(item.get("type", "")).strip()
@@ -214,7 +264,7 @@ def type_month_spent_figure(
         spent_amount = float(amount if amount > 0 else Decimal("0"))
         values_by_type[transaction_type][month_index[month_key]] += spent_amount
 
-    figure = create_type_month_comparison_figure(month_labels, active_types, values_by_type)
+    figure = create_type_month_comparison_figure(month_labels, active_types, values_by_type, month_count)
     return figure, available_types
 
 
@@ -345,12 +395,27 @@ def data_provision_layout() -> html.Div:
 
 
 def data_analysis_layout() -> html.Div:
+    default_month_count = 6
     labels, monthly_totals, load_error = monthly_expense_data()
     transactions, transaction_error = fetch_transactions()
-    default_type_figure, available_types = type_month_spent_figure(transactions, [])
-    daily_month_figure = daily_month_spent_figure(transactions)
+    default_type_figure, available_types = type_month_spent_figure(transactions, [], default_month_count)
+    daily_month_figure = daily_month_spent_figure(transactions, default_month_count)
+    top_merchants_figure = top_spend_donut_figure(
+        transactions,
+        group_key="merchant",
+        top_count=10,
+        title=f"Top 10 Merchants by Spend ({month_window_label(default_month_count)})",
+        month_count=default_month_count,
+    )
+    top_categories_figure = top_spend_donut_figure(
+        transactions,
+        group_key="type",
+        top_count=5,
+        title=f"Top 5 Categories by Spend ({month_window_label(default_month_count)})",
+        month_count=default_month_count,
+    )
     default_category = available_types[0] if available_types else None
-    available_merchants = distinct_merchants(transactions, default_category)
+    available_merchants = distinct_merchants(transactions, default_category, default_month_count)
 
     if not labels:
         labels, line_values, bar_values = generate_sample_data()
@@ -390,11 +455,30 @@ def data_analysis_layout() -> html.Div:
             html.H2("Data Analysis"),
             alert,
             html.Div(
+                style={"marginBottom": "18px"},
+                children=[
+                    html.Label(
+                        "Month range",
+                        htmlFor="month-window",
+                        style={"fontWeight": "700", "color": "#2b4c7e"},
+                    ),
+                    dcc.Slider(
+                        id="month-window",
+                        min=1,
+                        max=6,
+                        step=1,
+                        value=default_month_count,
+                        marks={month: str(month) for month in range(1, 7)},
+                        tooltip={"placement": "bottom", "always_visible": False},
+                    ),
+                ],
+            ),
+            html.Div(
                 style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "16px"},
                 children=[dcc.Graph(figure=line_fig), dcc.Graph(figure=bar_fig)],
             ),
             html.Hr(style={"margin": "22px 0"}),
-            html.H3("Monthly Type Comparison (Last 6 Months)"),
+            html.H3("Monthly Type Comparison"),
             html.P(
                 transaction_error or "Select or unselect types to filter the comparison chart.",
                 style={
@@ -413,10 +497,19 @@ def data_analysis_layout() -> html.Div:
             ),
             dcc.Graph(id="type-month-graph", figure=default_type_figure),
             html.Hr(style={"margin": "22px 0"}),
-            html.H3("Daily Spend Comparison (Last 6 Months)"),
+            html.H3("Daily Spend Comparison"),
             dcc.Graph(id="daily-month-graph", figure=daily_month_figure),
             html.Hr(style={"margin": "22px 0"}),
-            html.H3("Invoice Items by Category (Last 6 Months)"),
+            html.H3("Top Spend Breakdown"),
+            html.Div(
+                style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "16px"},
+                children=[
+                    dcc.Graph(id="top-merchants-graph", figure=top_merchants_figure),
+                    dcc.Graph(id="top-categories-graph", figure=top_categories_figure),
+                ],
+            ),
+            html.Hr(style={"margin": "22px 0"}),
+            html.H3("Invoice Items by Category"),
             dcc.Dropdown(
                 id="invoice-items-category-filter",
                 options=[{"label": transaction_type, "value": transaction_type} for transaction_type in available_types],
@@ -440,7 +533,7 @@ def data_analysis_layout() -> html.Div:
                     {"name": "Type", "id": "type"},
                     {"name": "Merchant", "id": "merchant"},
                 ],
-                data=invoice_items_by_category(transactions, default_category),
+                data=invoice_items_by_category(transactions, default_category, month_count=default_month_count),
                 page_size=18,
                 style_cell={
                     "padding": "8px",
@@ -550,23 +643,57 @@ def create_app() -> Dash:
     @app.callback(
         Output("type-month-graph", "figure"),
         Input("type-filter", "value"),
+        Input("month-window", "value"),
         prevent_initial_call=True,
     )
-    def refresh_type_month_graph(selected_types: list[str] | None):
+    def refresh_type_month_graph(selected_types: list[str] | None, month_count: int | None):
         transactions, _ = fetch_transactions()
-        figure, _ = type_month_spent_figure(transactions, selected_types or [])
+        figure, _ = type_month_spent_figure(transactions, selected_types or [], month_count or 6)
         return figure
+
+    @app.callback(
+        Output("daily-month-graph", "figure"),
+        Output("top-merchants-graph", "figure"),
+        Output("top-categories-graph", "figure"),
+        Input("month-window", "value"),
+        prevent_initial_call=True,
+    )
+    def refresh_month_window_graphs(month_count: int | None):
+        selected_month_count = month_count or 6
+        transactions, _ = fetch_transactions()
+        return (
+            daily_month_spent_figure(transactions, selected_month_count),
+            top_spend_donut_figure(
+                transactions,
+                group_key="merchant",
+                top_count=10,
+                title=f"Top 10 Merchants by Spend ({month_window_label(selected_month_count)})",
+                month_count=selected_month_count,
+            ),
+            top_spend_donut_figure(
+                transactions,
+                group_key="type",
+                top_count=5,
+                title=f"Top 5 Categories by Spend ({month_window_label(selected_month_count)})",
+                month_count=selected_month_count,
+            ),
+        )
 
     @app.callback(
         Output("invoice-items-merchant-filter", "options"),
         Output("invoice-items-merchant-filter", "value"),
         Input("invoice-items-category-filter", "value"),
+        Input("month-window", "value"),
         State("invoice-items-merchant-filter", "value"),
         prevent_initial_call=True,
     )
-    def refresh_invoice_items_merchant_options(selected_category: str | None, current_merchant: str | None):
+    def refresh_invoice_items_merchant_options(
+        selected_category: str | None,
+        month_count: int | None,
+        current_merchant: str | None,
+    ):
         transactions, _ = fetch_transactions()
-        merchants = distinct_merchants(transactions, selected_category)
+        merchants = distinct_merchants(transactions, selected_category, month_count or 6)
         options = [{"label": merchant, "value": merchant} for merchant in merchants]
         value = current_merchant if current_merchant in merchants else None
         return options, value
@@ -575,11 +702,16 @@ def create_app() -> Dash:
         Output("invoice-items-table", "data"),
         Input("invoice-items-category-filter", "value"),
         Input("invoice-items-merchant-filter", "value"),
+        Input("month-window", "value"),
         prevent_initial_call=True,
     )
-    def refresh_invoice_items_table(selected_category: str | None, selected_merchant: str | None):
+    def refresh_invoice_items_table(
+        selected_category: str | None,
+        selected_merchant: str | None,
+        month_count: int | None,
+    ):
         transactions, _ = fetch_transactions()
-        return invoice_items_by_category(transactions, selected_category, selected_merchant)
+        return invoice_items_by_category(transactions, selected_category, selected_merchant, month_count or 6)
 
     return app
 

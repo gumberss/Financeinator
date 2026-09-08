@@ -41,10 +41,35 @@ def create_bar_figure(labels: list[str], values: list[float]) -> go.Figure:
     return bar_fig
 
 
+def create_donut_figure(
+    labels: list[str],
+    values: list[float],
+    title: str,
+) -> go.Figure:
+    fig = go.Figure(
+        data=[
+            go.Pie(
+                labels=labels,
+                values=values,
+                hole=0.48,
+                texttemplate="%{label}<br>%{value:.2f}<br>%{percent}",
+                hovertemplate="%{label}<br>Amount: %{value:.2f}<br>Percentage: %{percent}<extra></extra>",
+            )
+        ]
+    )
+    fig.update_layout(
+        title=title,
+        template="plotly_white",
+        legend_title_text="Group",
+    )
+    return fig
+
+
 def create_type_month_comparison_figure(
     month_labels: list[str],
     types: list[str],
     values_by_type: dict[str, list[float]],
+    month_count: int,
 ) -> go.Figure:
     fig = go.Figure()
 
@@ -58,7 +83,7 @@ def create_type_month_comparison_figure(
         )
 
     fig.update_layout(
-        title="Spent by Type per Month (Last 6 Months)",
+        title=f"Spent by Type per Month (Last {month_count} Month{'s' if month_count != 1 else ''})",
         template="plotly_white",
         barmode="group",
         bargap=0.22,
@@ -74,6 +99,7 @@ def create_daily_month_comparison_figure(
     day_labels: list[int],
     month_labels: list[str],
     values_by_month: dict[str, list[float]],
+    month_count: int,
 ) -> go.Figure:
     fig = go.Figure()
 
@@ -90,7 +116,7 @@ def create_daily_month_comparison_figure(
         )
 
     fig.update_layout(
-        title="Daily Spend Comparison (Last 6 Months)",
+        title=f"Daily Spend Comparison (Last {month_count} Month{'s' if month_count != 1 else ''})",
         template="plotly_white",
         legend_title_text="Month",
         xaxis_title="Day of Month",

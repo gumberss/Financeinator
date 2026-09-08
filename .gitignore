@@ -59,6 +59,8 @@ htmlcov/
 
 # Local persisted repository data
 server_side/src/server_side/repositories/mappings.json
+server_side/src/server_side/repositories/transactions.json
+server_side/src/server_side/repositories/imported_csv_files.json
 
 # Logs
 *.log

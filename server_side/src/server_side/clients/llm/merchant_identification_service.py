@@ -8,7 +8,7 @@ _PROMPT_FILE = (
     Path(__file__).resolve().parents[4] / "ai_prompts" / "invoice_item_merchant_identification.md"
 )
 
-_REASONING_EFFORT = "low"
+_REASONING_EFFORT = "medium"
 
 
 class MerchantIdentificationError(RuntimeError):
