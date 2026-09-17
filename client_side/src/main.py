@@ -17,9 +17,13 @@ from components import (
 )
 
 
-SERVER_IMPORT_URL = "http://127.0.0.1:8100/api/v1/transactions/import-csv"
-SERVER_TRANSACTIONS_URL = "http://127.0.0.1:8100/api/v1/transactions/"
-SERVER_TITLE_MAPPINGS_URL = "http://127.0.0.1:8100/api/v1/transactions/title-mappings"
+SERVER_IMPORT_URL = "http://127.0.0.1:8000/api/v1/transactions/import-csv"
+SERVER_TRANSACTIONS_URL = "http://127.0.0.1:8000/api/v1/transactions/"
+SERVER_TITLE_MAPPINGS_URL = "http://127.0.0.1:8000/api/v1/transactions/title-mappings"
+
+
+def fmt_currency(value: float | Decimal | int) -> str:
+    return f"${float(value):,.2f}"
 
 
 def panel(children: object, **kwargs) -> html.Div:
@@ -410,6 +414,65 @@ def submit_title_mappings(rows: list[dict[str, str]] | None) -> tuple[bool, str,
     return True, "Type mappings saved.", saved_rows
 
 
+def stat_card(title: str, value: str, subtitle: str, accent: str) -> html.Div:
+    return html.Div(
+        style={
+            "background": "linear-gradient(135deg, #ffffff 0%, #f8fbff 100%)",
+            "border": "1px solid #e2e8f0",
+            "borderRadius": "16px",
+            "padding": "16px 18px",
+            "boxShadow": "0 8px 24px rgba(15, 23, 42, 0.04)",
+            "borderLeft": f"5px solid {accent}",
+        },
+        children=[
+            html.Div(style={"fontSize": "12px", "textTransform": "uppercase", "letterSpacing": "0.08em", "color": "#64748b", "fontWeight": "700"}, children=title),
+            html.Div(style={"fontSize": "28px", "fontWeight": "800", "color": "#0f172a", "marginTop": "8px", "lineHeight": "1.1"}, children=value),
+            html.Div(style={"fontSize": "13px", "color": "#475569", "marginTop": "8px"}, children=subtitle),
+        ],
+    )
+
+
+def dashboard_kpis(transactions: list[dict], month_count: int = 6) -> list[html.Div]:
+    if not transactions:
+        return [
+            stat_card("Total spend", "$0.00", "No transaction data yet", "#94a3b8"),
+            stat_card("Top category", "—", "Upload a CSV to begin", "#7c3aed"),
+            stat_card("Avg monthly", "$0.00", "Waiting for data", "#10b981"),
+        ]
+
+    recent_months = last_n_month_labels(transactions, month_count)
+    recent_transactions = [
+        item for item in transactions if date.fromisoformat(item["date"]).strftime("%Y-%m") in set(recent_months)
+    ]
+
+    total_spend = sum(Decimal(str(item.get("amount", 0))) for item in recent_transactions if Decimal(str(item.get("amount", 0))) > 0)
+    monthly_totals = defaultdict(lambda: Decimal("0"))
+    for item in recent_transactions:
+        amount = Decimal(str(item.get("amount", 0)))
+        if amount <= 0:
+            continue
+        month_key = date.fromisoformat(item["date"]).strftime("%Y-%m")
+        monthly_totals[month_key] += amount
+
+    avg_monthly = total_spend / Decimal(len(monthly_totals)) if monthly_totals else Decimal("0")
+
+    category_totals = defaultdict(lambda: Decimal("0"))
+    for item in recent_transactions:
+        amount = Decimal(str(item.get("amount", 0)))
+        if amount <= 0:
+            continue
+        category_totals[str(item.get("type", "")).strip() or "Unmapped"] += amount
+
+    top_category = max(category_totals.items(), key=lambda entry: entry[1])[0] if category_totals else "—"
+    top_category_value = category_totals[top_category] if top_category != "—" else Decimal("0")
+
+    return [
+        stat_card("Total spend", fmt_currency(total_spend), f"Last {month_count} months", "#2563eb"),
+        stat_card("Top category", top_category if top_category != "—" else "—", f"{fmt_currency(top_category_value)} in recent spend", "#7c3aed"),
+        stat_card("Avg monthly", fmt_currency(avg_monthly), "Mean monthly spend", "#10b981"),
+    ]
+
+
 def data_provision_layout() -> html.Div:
     mapping_rows, mapping_error = fetch_title_mappings()
 
@@ -417,69 +480,77 @@ def data_provision_layout() -> html.Div:
     status_color = "#9b1c1c" if mapping_error else "#2b4c7e"
 
     return html.Div(
+        style={"display": "grid", "gap": "20px"},
         children=[
-            html.H2("Data Provision"),
-            html.P("Upload a CSV with columns: date,title,amount."),
-            dcc.Upload(
-                id="transaction-upload",
-                children=html.Div("Drop CSV here or click to choose file"),
-                multiple=False,
-                style={
-                    "width": "100%",
-                    "height": "110px",
-                    "lineHeight": "110px",
-                    "borderWidth": "2px",
-                    "borderStyle": "dashed",
-                    "borderRadius": "14px",
-                    "textAlign": "center",
-                    "background": "#f8fbff",
-                    "borderColor": "#9ebbe8",
-                    "color": "#2b4c7e",
-                    "fontWeight": "600",
-                },
+            html.H2("Data Provision", style={"margin": "0", "color": "#0f172a", "fontSize": "32px"}),
+            panel(
+                [
+                    html.P("Upload a CSV with columns: date,title,amount.", style={"marginTop": "0", "marginBottom": "16px", "color": "#475569", "fontWeight": "600"}),
+                    dcc.Upload(
+                        id="transaction-upload",
+                        children=html.Div("Drop CSV here or click to choose file", style={"display": "flex", "alignItems": "center", "justifyContent": "center", "height": "100%", "fontWeight": "700"}),
+                        multiple=False,
+                        style={
+                            "width": "100%",
+                            "height": "110px",
+                            "lineHeight": "110px",
+                            "borderWidth": "2px",
+                            "borderStyle": "dashed",
+                            "borderRadius": "14px",
+                            "textAlign": "center",
+                            "background": "linear-gradient(135deg, #f8fbff 0%, #edf4ff 100%)",
+                            "borderColor": "#9ebbe8",
+                            "color": "#2b4c7e",
+                            "fontWeight": "600",
+                        },
+                    ),
+                    html.Div(id="upload-result", style={"marginTop": "14px"}),
+                ]
             ),
-            html.Div(id="upload-result", style={"marginTop": "14px"}),
-            html.Hr(style={"margin": "22px 0"}),
-            html.H3("Transaction Title Type Mapping"),
-            html.P(
-                status_text,
-                style={"marginBottom": "10px", "color": status_color, "fontWeight": "600"},
+            panel(
+                [
+                    html.H3("Transaction Title Type Mapping", style={"marginTop": "0", "marginBottom": "10px", "color": "#0f172a"}),
+                    html.P(
+                        status_text,
+                        style={"marginBottom": "10px", "color": status_color, "fontWeight": "600"},
+                    ),
+                    dash_table.DataTable(
+                        id="title-mapping-table",
+                        columns=[
+                            {"name": "Title", "id": "title", "editable": False},
+                            {"name": "Type", "id": "type", "editable": True},
+                            {"name": "Merchant", "id": "merchant", "editable": True},
+                        ],
+                        data=mapping_rows,
+                        editable=True,
+                        page_size=12,
+                        style_cell={
+                            "padding": "8px",
+                            "fontFamily": "Segoe UI",
+                            "fontSize": "14px",
+                            "textAlign": "left",
+                        },
+                        style_header={"fontWeight": "700", "backgroundColor": "#f8fafc"},
+                        style_table={"border": "1px solid #dfe7f1", "borderRadius": "12px", "overflow": "hidden"},
+                    ),
+                    html.Button(
+                        "Submit Mapping",
+                        id="submit-title-mapping",
+                        n_clicks=0,
+                        style={
+                            "marginTop": "12px",
+                            "padding": "10px 14px",
+                            "border": "1px solid #2b4c7e",
+                            "borderRadius": "8px",
+                            "background": "#2b4c7e",
+                            "color": "#ffffff",
+                            "fontWeight": "600",
+                            "cursor": "pointer",
+                        },
+                    ),
+                    html.Div(id="title-mapping-result", style={"marginTop": "12px"}),
+                ]
             ),
-            dash_table.DataTable(
-                id="title-mapping-table",
-                columns=[
-                    {"name": "Title", "id": "title", "editable": False},
-                    {"name": "Type", "id": "type", "editable": True},
-                    {"name": "Merchant", "id": "merchant", "editable": True},
-                ],
-                data=mapping_rows,
-                editable=True,
-                page_size=12,
-                style_cell={
-                    "padding": "8px",
-                    "fontFamily": "Segoe UI",
-                    "fontSize": "14px",
-                    "textAlign": "left",
-                },
-                style_header={"fontWeight": "700", "backgroundColor": "#f2f7ff"},
-                style_table={"border": "1px solid #d9e2f2", "borderRadius": "8px", "overflow": "hidden"},
-            ),
-            html.Button(
-                "Submit Mapping",
-                id="submit-title-mapping",
-                n_clicks=0,
-                style={
-                    "marginTop": "12px",
-                    "padding": "10px 14px",
-                    "border": "1px solid #2b4c7e",
-                    "borderRadius": "8px",
-                    "background": "#2b4c7e",
-                    "color": "#ffffff",
-                    "fontWeight": "600",
-                    "cursor": "pointer",
-                },
-            ),
-            html.Div(id="title-mapping-result", style={"marginTop": "12px"}),
         ]
     )
 
@@ -519,13 +590,12 @@ def data_analysis_layout() -> html.Div:
         alert = html.Div(
             message,
             style={
-                "marginBottom": "10px",
-                "padding": "10px 12px",
-                "borderRadius": "10px",
-                "border": "1px solid #b08900",
+                "padding": "12px 14px",
+                "borderRadius": "12px",
+                "border": "1px solid #facc15",
                 "color": "#7a5d00",
                 "background": "#fff9e6",
-                "fontWeight": "600",
+                "fontWeight": "700",
             },
         )
     else:
@@ -534,20 +604,25 @@ def data_analysis_layout() -> html.Div:
         alert = html.Div(
             "Monthly totals loaded from transactions.",
             style={
-                "marginBottom": "10px",
-                "padding": "10px 12px",
-                "borderRadius": "10px",
-                "border": "1px solid #1f7a3d",
-                "color": "#1f7a3d",
-                "background": "#eaf7ef",
-                "fontWeight": "600",
+                "padding": "12px 14px",
+                "borderRadius": "12px",
+                "border": "1px solid #86efac",
+                "color": "#14532d",
+                "background": "#f0fdf4",
+                "fontWeight": "700",
             },
         )
+
+    kpis = dashboard_kpis(transactions, default_month_count)
 
     return html.Div(
         style={"display": "grid", "gap": "20px"},
         children=[
             html.H2("Data Analysis", style={"margin": "0", "color": "#0f172a", "fontSize": "32px"}),
+            html.Div(
+                style={"display": "grid", "gridTemplateColumns": "repeat(auto-fit, minmax(200px, 1fr))", "gap": "16px"},
+                children=kpis,
+            ),
             alert,
             panel(
                 [
