@@ -64,7 +64,7 @@ This is the setup and cleanup stage before the spending analysis becomes meaning
 
 This tab is the main reporting section. It gives you a high-level view of your spending patterns across time and categories.
 
-#### Spending by Category
+#### Monthly Type Comparison
 
 This chart compares how much was spent in each category across the selected months.
 
@@ -76,7 +76,7 @@ Use it to answer questions like:
 
 Each bar group represents a month, and each colored bar within the group represents a spending category.
 
-#### Category Change vs Previous Month
+#### Month-over-Month Change by Category
 
 This chart shows how each category changed compared with the previous month.
 
@@ -88,7 +88,7 @@ It is useful for spotting short-term spikes or drops. For example:
 
 Positive values indicate spending increased compared with the prior month; negative values indicate a reduction.
 
-#### Category Change vs Selected Month
+#### Change vs Selected Month
 
 This chart compares monthly spending across categories against a chosen baseline month.
 
@@ -99,7 +99,7 @@ It is helpful when you want to answer:
 
 This is the broader “vs baseline” view, while the previous chart shows the more immediate move from one month to the next.
 
-#### Daily Spending Comparison
+#### Daily Spend Comparison
 
 This chart shows daily spending patterns within the selected recent months.
 
