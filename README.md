@@ -64,9 +64,13 @@ This is the setup and cleanup stage before the spending analysis becomes meaning
 
 This tab is the main reporting section. It gives you a high-level view of your spending patterns across time and categories.
 
+All data shown in the graphs below is simulated and used only to demonstrate the visualization format.
+
 #### Monthly Type Comparison
 
 This chart compares how much was spent in each category across the selected months.
+
+<img width="1299" height="596" alt="image" src="https://github.com/user-attachments/assets/3579ec13-3183-4d2e-8002-2552889164bb" />
 
 Use it to answer questions like:
 
@@ -80,6 +84,8 @@ Each bar group represents a month, and each colored bar within the group represe
 
 This chart shows how each category changed compared with the previous month.
 
+<img width="1323" height="587" alt="image" src="https://github.com/user-attachments/assets/6bef0610-3974-498e-a4f2-ac024ac1d672" />
+
 It is useful for spotting short-term spikes or drops. For example:
 
 - a category suddenly jumping upward in a given month
@@ -92,6 +98,8 @@ Positive values indicate spending increased compared with the prior month; negat
 
 This chart compares monthly spending across categories against a chosen baseline month.
 
+<img width="1300" height="610" alt="image" src="https://github.com/user-attachments/assets/03177c0c-5a97-4061-a34b-dcaee18586a3" />
+
 It is helpful when you want to answer:
 
 - how much higher or lower was spending this month compared with a reference month?
@@ -102,6 +110,8 @@ This is the broader “vs baseline” view, while the previous chart shows the m
 #### Daily Spend Comparison
 
 This chart shows daily spending patterns within the selected recent months.
+
+<img width="1308" height="535" alt="image" src="https://github.com/user-attachments/assets/6ef4fb91-f23e-405c-bbf2-435fb39e1ea4" />
 
 Use it to identify:
 
@@ -118,6 +128,8 @@ This section includes the donut charts for:
 - top merchants by spend
 - top categories by spend
 
+<img width="1289" height="534" alt="image" src="https://github.com/user-attachments/assets/ab246ac4-3d35-46ae-a6bf-3a7bc83f4b2d" />
+
 These charts help quickly identify the biggest spending drivers without digging through raw rows.
 
 This is especially useful for seeing whether a small number of merchants or categories account for most of your total spending.
@@ -125,6 +137,8 @@ This is especially useful for seeing whether a small number of merchants or cate
 #### Invoice Items by Category
 
 This table lists the individual transactions in the selected category and optional merchant filter.
+
+<img width="1298" height="410" alt="image" src="https://github.com/user-attachments/assets/84f0c5d8-642a-4b8d-9977-92df78a49e52" />
 
 It allows you to:
 
