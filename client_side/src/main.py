@@ -11,6 +11,8 @@ from components import (
     create_daily_month_comparison_figure,
     create_donut_figure,
     create_line_figure,
+    create_month_over_month_diff_figure,
+    create_month_vs_baseline_diff_figure,
     create_type_month_comparison_figure,
 )
 
@@ -18,6 +20,19 @@ from components import (
 SERVER_IMPORT_URL = "http://127.0.0.1:8100/api/v1/transactions/import-csv"
 SERVER_TRANSACTIONS_URL = "http://127.0.0.1:8100/api/v1/transactions/"
 SERVER_TITLE_MAPPINGS_URL = "http://127.0.0.1:8100/api/v1/transactions/title-mappings"
+
+
+def panel(children: object, **kwargs) -> html.Div:
+    style = {
+        "background": "#ffffff",
+        "border": "1px solid #e2e8f0",
+        "borderRadius": "18px",
+        "boxShadow": "0 10px 30px rgba(15, 23, 42, 0.06)",
+        "padding": "20px 22px",
+    }
+    if "style" in kwargs:
+        style.update(kwargs.pop("style"))
+    return html.Div(children=children, style=style, **kwargs)
 
 
 def generate_sample_data() -> tuple[list[str], list[int], list[int]]:
@@ -268,6 +283,81 @@ def type_month_spent_figure(
     return figure, available_types
 
 
+def category_month_totals(
+    transactions: list[dict],
+    month_labels: list[str],
+) -> tuple[dict[str, list[float]], list[str]]:
+    available_types = sorted(
+        {
+            str(item.get("type", "")).strip()
+            for item in transactions
+            if str(item.get("type", "")).strip()
+        }
+    )
+
+    totals_by_type: dict[str, list[float]] = {
+        transaction_type: [0.0 for _ in month_labels] for transaction_type in available_types
+    }
+
+    month_index = {label: idx for idx, label in enumerate(month_labels)}
+    for item in transactions:
+        transaction_type = str(item.get("type", "")).strip()
+        if transaction_type not in totals_by_type:
+            continue
+
+        transaction_date = date.fromisoformat(item["date"])
+        month_key = transaction_date.strftime("%Y-%m")
+        if month_key not in month_index:
+            continue
+
+        amount = Decimal(str(item.get("amount", 0)))
+        spent_amount = float(amount if amount > 0 else Decimal("0"))
+        totals_by_type[transaction_type][month_index[month_key]] += spent_amount
+
+    return totals_by_type, available_types
+
+
+def category_month_over_month_diff_figure(transactions: list[dict], month_count: int) -> object:
+    month_labels = last_n_month_labels(transactions, month_count + 1)
+    totals_by_type, available_types = category_month_totals(transactions, month_labels)
+
+    diff_month_labels = month_labels[1:]
+    diffs_by_type: dict[str, list[float]] = {
+        transaction_type: [
+            totals[i] - totals[i - 1] for i in range(1, len(totals))
+        ]
+        for transaction_type, totals in totals_by_type.items()
+    }
+
+    return create_month_over_month_diff_figure(diff_month_labels, available_types, diffs_by_type, month_count)
+
+
+def category_baseline_month_options(transactions: list[dict], month_count: int) -> list[str]:
+    return last_n_month_labels(transactions, month_count)
+
+
+def category_baseline_diff_figure(
+    transactions: list[dict],
+    month_count: int,
+    baseline_month: str | None,
+) -> object:
+    month_labels = last_n_month_labels(transactions, month_count)
+    if baseline_month not in month_labels:
+        baseline_month = month_labels[0] if month_labels else None
+
+    totals_by_type, available_types = category_month_totals(transactions, month_labels)
+
+    baseline_index = month_labels.index(baseline_month) if baseline_month in month_labels else 0
+    diffs_by_type: dict[str, list[float]] = {
+        transaction_type: [total - totals[baseline_index] for total in totals]
+        for transaction_type, totals in totals_by_type.items()
+    }
+
+    return create_month_vs_baseline_diff_figure(
+        month_labels, available_types, diffs_by_type, baseline_month or ""
+    )
+
+
 def fetch_title_mappings() -> tuple[list[dict[str, str]], str | None]:
     try:
         response = requests.get(SERVER_TITLE_MAPPINGS_URL, timeout=10)
@@ -416,6 +506,10 @@ def data_analysis_layout() -> html.Div:
     )
     default_category = available_types[0] if available_types else None
     available_merchants = distinct_merchants(transactions, default_category, default_month_count)
+    category_diff_figure = category_month_over_month_diff_figure(transactions, default_month_count)
+    baseline_month_options = category_baseline_month_options(transactions, default_month_count)
+    default_baseline_month = baseline_month_options[0] if baseline_month_options else None
+    baseline_diff_figure = category_baseline_diff_figure(transactions, default_month_count, default_baseline_month)
 
     if not labels:
         labels, line_values, bar_values = generate_sample_data()
@@ -451,121 +545,221 @@ def data_analysis_layout() -> html.Div:
         )
 
     return html.Div(
+        style={"display": "grid", "gap": "20px"},
         children=[
-            html.H2("Data Analysis"),
+            html.H2("Data Analysis", style={"margin": "0", "color": "#0f172a", "fontSize": "32px"}),
             alert,
-            html.Div(
-                style={"marginBottom": "18px"},
-                children=[
-                    html.Label(
-                        "Month range",
-                        htmlFor="month-window",
-                        style={"fontWeight": "700", "color": "#2b4c7e"},
+            panel(
+                [
+                    html.Div(
+                        style={"marginBottom": "18px"},
+                        children=[
+                            html.Label(
+                                "Month range",
+                                htmlFor="month-window",
+                                style={"fontWeight": "700", "color": "#1e293b", "display": "block", "marginBottom": "10px"},
+                            ),
+                            dcc.Slider(
+                                id="month-window",
+                                min=1,
+                                max=6,
+                                step=1,
+                                value=default_month_count,
+                                marks={month: str(month) for month in range(1, 7)},
+                                tooltip={"placement": "bottom", "always_visible": False},
+                            ),
+                        ],
                     ),
-                    dcc.Slider(
-                        id="month-window",
-                        min=1,
-                        max=6,
-                        step=1,
-                        value=default_month_count,
-                        marks={month: str(month) for month in range(1, 7)},
-                        tooltip={"placement": "bottom", "always_visible": False},
+                    html.Div(
+                        style={
+                            "display": "grid",
+                            "gridTemplateColumns": "repeat(auto-fit, minmax(320px, 1fr))",
+                            "gap": "18px",
+                        },
+                        children=[dcc.Graph(figure=line_fig, config={"displayModeBar": False}), dcc.Graph(figure=bar_fig, config={"displayModeBar": False})],
                     ),
-                ],
+                ]
             ),
-            html.Div(
-                style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "16px"},
-                children=[dcc.Graph(figure=line_fig), dcc.Graph(figure=bar_fig)],
+            panel(
+                [
+                    html.H3("Monthly Type Comparison", style={"marginTop": "0", "marginBottom": "12px", "color": "#0f172a"}),
+                    html.P(
+                        transaction_error or "Select or unselect types to filter the comparison chart.",
+                        style={
+                            "marginBottom": "10px",
+                            "color": "#9b1c1c" if transaction_error else "#475569",
+                            "fontWeight": "600",
+                        },
+                    ),
+                    dcc.Dropdown(
+                        id="type-filter",
+                        options=[{"label": transaction_type, "value": transaction_type} for transaction_type in available_types],
+                        value=available_types,
+                        multi=True,
+                        placeholder="Select transaction types",
+                        style={"marginBottom": "12px"},
+                    ),
+                    dcc.Graph(id="type-month-graph", figure=default_type_figure, config={"displayModeBar": False}),
+                ]
             ),
-            html.Hr(style={"margin": "22px 0"}),
-            html.H3("Monthly Type Comparison"),
-            html.P(
-                transaction_error or "Select or unselect types to filter the comparison chart.",
-                style={
-                    "marginBottom": "10px",
-                    "color": "#9b1c1c" if transaction_error else "#2b4c7e",
-                    "fontWeight": "600",
-                },
+            panel(
+                [
+                    html.H3("Month-over-Month Change by Category", style={"marginTop": "0", "marginBottom": "12px", "color": "#0f172a"}),
+                    html.P(
+                        "Each bar shows how much more (positive) or less (negative) was spent per category compared to the previous month.",
+                        style={"marginBottom": "10px", "color": "#475569", "fontWeight": "600"},
+                    ),
+                    dcc.Graph(id="category-diff-graph", figure=category_diff_figure, config={"displayModeBar": False}),
+                ]
             ),
-            dcc.Dropdown(
-                id="type-filter",
-                options=[{"label": transaction_type, "value": transaction_type} for transaction_type in available_types],
-                value=available_types,
-                multi=True,
-                placeholder="Select transaction types",
-                style={"marginBottom": "12px"},
+            panel(
+                [
+                    html.H3("Change vs Selected Month", style={"marginTop": "0", "marginBottom": "12px", "color": "#0f172a"}),
+                    html.P(
+                        "Pick a baseline month to see how much more (positive) or less (negative) was spent per category in each month compared to it.",
+                        style={"marginBottom": "10px", "color": "#475569", "fontWeight": "600"},
+                    ),
+                    dcc.Dropdown(
+                        id="baseline-month-select",
+                        options=[{"label": month, "value": month} for month in baseline_month_options],
+                        value=default_baseline_month,
+                        clearable=False,
+                        style={"marginBottom": "12px"},
+                    ),
+                    dcc.Graph(id="baseline-diff-graph", figure=baseline_diff_figure, config={"displayModeBar": False}),
+                ]
             ),
-            dcc.Graph(id="type-month-graph", figure=default_type_figure),
-            html.Hr(style={"margin": "22px 0"}),
-            html.H3("Daily Spend Comparison"),
-            dcc.Graph(id="daily-month-graph", figure=daily_month_figure),
-            html.Hr(style={"margin": "22px 0"}),
-            html.H3("Top Spend Breakdown"),
-            html.Div(
-                style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "16px"},
-                children=[
-                    dcc.Graph(id="top-merchants-graph", figure=top_merchants_figure),
-                    dcc.Graph(id="top-categories-graph", figure=top_categories_figure),
-                ],
+            panel(
+                [
+                    html.H3("Daily Spend Comparison", style={"marginTop": "0", "marginBottom": "12px", "color": "#0f172a"}),
+                    dcc.Graph(id="daily-month-graph", figure=daily_month_figure, config={"displayModeBar": False}),
+                ]
             ),
-            html.Hr(style={"margin": "22px 0"}),
-            html.H3("Invoice Items by Category"),
-            dcc.Dropdown(
-                id="invoice-items-category-filter",
-                options=[{"label": transaction_type, "value": transaction_type} for transaction_type in available_types],
-                value=default_category,
-                placeholder="Select a category",
-                style={"marginBottom": "12px"},
+            panel(
+                [
+                    html.H3("Top Spend Breakdown", style={"marginTop": "0", "marginBottom": "12px", "color": "#0f172a"}),
+                    html.Div(
+                        style={"display": "grid", "gridTemplateColumns": "repeat(auto-fit, minmax(300px, 1fr))", "gap": "18px"},
+                        children=[
+                            dcc.Graph(id="top-merchants-graph", figure=top_merchants_figure, config={"displayModeBar": False}),
+                            dcc.Graph(id="top-categories-graph", figure=top_categories_figure, config={"displayModeBar": False}),
+                        ],
+                    ),
+                ]
             ),
-            dcc.Dropdown(
-                id="invoice-items-merchant-filter",
-                options=[{"label": merchant, "value": merchant} for merchant in available_merchants],
-                value=None,
-                placeholder="Select a merchant (optional)",
-                style={"marginBottom": "12px"},
+            panel(
+                [
+                    html.H3("Invoice Items by Category", style={"marginTop": "0", "marginBottom": "12px", "color": "#0f172a"}),
+                    dcc.Dropdown(
+                        id="invoice-items-category-filter",
+                        options=[{"label": transaction_type, "value": transaction_type} for transaction_type in available_types],
+                        value=default_category,
+                        placeholder="Select a category",
+                        style={"marginBottom": "12px"},
+                    ),
+                    dcc.Dropdown(
+                        id="invoice-items-merchant-filter",
+                        options=[{"label": merchant, "value": merchant} for merchant in available_merchants],
+                        value=None,
+                        placeholder="Select a merchant (optional)",
+                        style={"marginBottom": "12px"},
+                    ),
+                    dash_table.DataTable(
+                        id="invoice-items-table",
+                        columns=[
+                            {"name": "Date", "id": "date"},
+                            {"name": "Title", "id": "title"},
+                            {"name": "Amount", "id": "amount"},
+                            {"name": "Type", "id": "type"},
+                            {"name": "Merchant", "id": "merchant"},
+                        ],
+                        data=invoice_items_by_category(transactions, default_category, month_count=default_month_count),
+                        page_size=18,
+                        style_cell={
+                            "padding": "8px",
+                            "fontFamily": "Segoe UI",
+                            "fontSize": "14px",
+                            "textAlign": "left",
+                            "whiteSpace": "normal",
+                            "height": "auto",
+                        },
+                        style_header={"fontWeight": "700", "backgroundColor": "#f8fafc", "color": "#0f172a"},
+                        style_table={"border": "1px solid #dfe7f1", "borderRadius": "12px", "overflow": "hidden"},
+                        style_data_conditional=[
+                            {"if": {"row_index": "odd"}, "backgroundColor": "#f8fafc"}
+                        ],
+                    ),
+                ]
             ),
-            dash_table.DataTable(
-                id="invoice-items-table",
-                columns=[
-                    {"name": "Date", "id": "date"},
-                    {"name": "Title", "id": "title"},
-                    {"name": "Amount", "id": "amount"},
-                    {"name": "Type", "id": "type"},
-                    {"name": "Merchant", "id": "merchant"},
-                ],
-                data=invoice_items_by_category(transactions, default_category, month_count=default_month_count),
-                page_size=18,
-                style_cell={
-                    "padding": "8px",
-                    "fontFamily": "Segoe UI",
-                    "fontSize": "14px",
-                    "textAlign": "left",
-                },
-                style_header={"fontWeight": "700", "backgroundColor": "#f2f7ff"},
-                style_table={"border": "1px solid #d9e2f2", "borderRadius": "8px", "overflow": "hidden"},
-            ),
-        ]
+        ],
     )
 
 
 def create_app() -> Dash:
     app = Dash(__name__, suppress_callback_exceptions=True)
     app.layout = html.Div(
-        style={"maxWidth": "1200px", "margin": "20px auto", "padding": "0 16px 24px"},
+        style={
+            "minHeight": "100vh",
+            "background": "linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%)",
+            "padding": "32px 20px 48px",
+        },
         children=[
-            html.H1("Financeinator Client Dashboard"),
-            dcc.Tabs(
-                id="top-menu",
-                value="data-analysis",
-                children=[
-                    dcc.Tab(label="Data Provision", value="data-provision"),
-                    dcc.Tab(label="Data Analysis", value="data-analysis"),
-                ],
-            ),
             html.Div(
-                id="screen-content",
-                style={"marginTop": "18px"},
-            ),
+                style={"maxWidth": "1280px", "margin": "0 auto"},
+                children=[
+                    html.Div(
+                        style={
+                            "display": "flex",
+                            "justifyContent": "space-between",
+                            "alignItems": "center",
+                            "gap": "12px",
+                            "marginBottom": "20px",
+                            "padding": "10px 14px 0",
+                            "flexWrap": "wrap",
+                        },
+                        children=[
+                            html.Div(
+                                children=[
+                                    html.H1(
+                                        "Financeinator",
+                                        style={
+                                            "margin": "0",
+                                            "fontSize": "36px",
+                                            "fontWeight": "800",
+                                            "color": "#0f172a",
+                                            "letterSpacing": "-0.04em",
+                                        },
+                                    ),
+                                    html.P(
+                                        "Personal finance dashboard",
+                                        style={"margin": "4px 0 0", "color": "#475569", "fontSize": "15px"},
+                                    ),
+                                ]
+                            ),
+                        ],
+                    ),
+                    dcc.Tabs(
+                        id="top-menu",
+                        value="data-analysis",
+                        children=[
+                            dcc.Tab(label="Data Provision", value="data-provision"),
+                            dcc.Tab(label="Data Analysis", value="data-analysis"),
+                        ],
+                        style={
+                            "background": "#ffffff",
+                            "borderRadius": "14px 14px 0 0",
+                            "border": "1px solid #dfe7f1",
+                            "paddingTop": "4px",
+                            "boxShadow": "0 8px 24px rgba(15, 23, 42, 0.04)",
+                        },
+                        content_style={"padding": "18px 0 0"},
+                    ),
+                    html.Div(
+                        id="screen-content",
+                        style={"marginTop": "0", "paddingTop": "4px"},
+                    ),
+                ],
+            )
         ],
     )
 
@@ -655,6 +849,7 @@ def create_app() -> Dash:
         Output("daily-month-graph", "figure"),
         Output("top-merchants-graph", "figure"),
         Output("top-categories-graph", "figure"),
+        Output("category-diff-graph", "figure"),
         Input("month-window", "value"),
         prevent_initial_call=True,
     )
@@ -677,7 +872,33 @@ def create_app() -> Dash:
                 title=f"Top 5 Categories by Spend ({month_window_label(selected_month_count)})",
                 month_count=selected_month_count,
             ),
+            category_month_over_month_diff_figure(transactions, selected_month_count),
         )
+
+    @app.callback(
+        Output("baseline-month-select", "options"),
+        Output("baseline-month-select", "value"),
+        Input("month-window", "value"),
+        State("baseline-month-select", "value"),
+        prevent_initial_call=True,
+    )
+    def refresh_baseline_month_options(month_count: int | None, current_baseline: str | None):
+        selected_month_count = month_count or 6
+        transactions, _ = fetch_transactions()
+        options = category_baseline_month_options(transactions, selected_month_count)
+        value = current_baseline if current_baseline in options else (options[0] if options else None)
+        return [{"label": month, "value": month} for month in options], value
+
+    @app.callback(
+        Output("baseline-diff-graph", "figure"),
+        Input("month-window", "value"),
+        Input("baseline-month-select", "value"),
+        prevent_initial_call=True,
+    )
+    def refresh_baseline_diff_graph(month_count: int | None, baseline_month: str | None):
+        selected_month_count = month_count or 6
+        transactions, _ = fetch_transactions()
+        return category_baseline_diff_figure(transactions, selected_month_count, baseline_month)
 
     @app.callback(
         Output("invoice-items-merchant-filter", "options"),

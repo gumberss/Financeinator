@@ -95,6 +95,68 @@ def create_type_month_comparison_figure(
     return fig
 
 
+def create_month_over_month_diff_figure(
+    month_labels: list[str],
+    types: list[str],
+    diffs_by_type: dict[str, list[float]],
+    month_count: int,
+) -> go.Figure:
+    fig = go.Figure()
+
+    for transaction_type in types:
+        fig.add_trace(
+            go.Bar(
+                x=month_labels,
+                y=diffs_by_type.get(transaction_type, [0.0] * len(month_labels)),
+                name=transaction_type,
+            )
+        )
+
+    fig.update_layout(
+        title=f"Month-over-Month Change by Category (Last {month_count} Month{'s' if month_count != 1 else ''})",
+        template="plotly_white",
+        barmode="relative",
+        bargap=0.28,
+        barcornerradius=5,
+        legend_title_text="Type",
+        yaxis_title="Change vs Previous Month",
+        xaxis_title="Month",
+    )
+    fig.add_hline(y=0, line_width=1, line_color="rgba(0, 0, 0, 0.35)")
+    return fig
+
+
+def create_month_vs_baseline_diff_figure(
+    month_labels: list[str],
+    types: list[str],
+    diffs_by_type: dict[str, list[float]],
+    baseline_month: str,
+) -> go.Figure:
+    fig = go.Figure()
+
+    for transaction_type in types:
+        fig.add_trace(
+            go.Bar(
+                x=month_labels,
+                y=diffs_by_type.get(transaction_type, [0.0] * len(month_labels)),
+                name=transaction_type,
+            )
+        )
+
+    fig.update_layout(
+        title=f"Change vs {baseline_month} by Category",
+        template="plotly_white",
+        barmode="relative",
+        bargap=0.28,
+        barcornerradius=5,
+        legend_title_text="Type",
+        yaxis_title=f"Change vs {baseline_month}",
+        xaxis_title="Month",
+    )
+    fig.add_hline(y=0, line_width=1, line_color="rgba(0, 0, 0, 0.35)")
+    return fig
+
+
 def create_daily_month_comparison_figure(
     day_labels: list[int],
     month_labels: list[str],
