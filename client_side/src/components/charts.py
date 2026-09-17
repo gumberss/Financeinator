@@ -14,7 +14,7 @@ def create_line_figure(labels: list[str], values: list[float]) -> go.Figure:
             )
         ]
     )
-    line_fig.update_layout(title="Line Graph", template="plotly_white")
+    line_fig.update_layout(title="Monthly Spend Trend", template="plotly_white")
     return line_fig
 
 
@@ -33,7 +33,7 @@ def create_bar_figure(labels: list[str], values: list[float]) -> go.Figure:
         ]
     )
     bar_fig.update_layout(
-        title="Bar Graph",
+        title="Monthly Spend by Month",
         template="plotly_white",
         bargap=0.28,
         barcornerradius=5,
@@ -83,7 +83,7 @@ def create_type_month_comparison_figure(
         )
 
     fig.update_layout(
-        title=f"Spent by Type per Month (Last {month_count} Month{'s' if month_count != 1 else ''})",
+        title=f"Spending by Category (Last {month_count} Month{'s' if month_count != 1 else ''})",
         template="plotly_white",
         barmode="group",
         bargap=0.22,
@@ -113,7 +113,7 @@ def create_month_over_month_diff_figure(
         )
 
     fig.update_layout(
-        title=f"Month-over-Month Change by Category (Last {month_count} Month{'s' if month_count != 1 else ''})",
+        title=f"Category Change vs Previous Month (Last {month_count} Month{'s' if month_count != 1 else ''})",
         template="plotly_white",
         barmode="relative",
         bargap=0.28,
@@ -144,7 +144,7 @@ def create_month_vs_baseline_diff_figure(
         )
 
     fig.update_layout(
-        title=f"Change vs {baseline_month} by Category",
+        title=f"Category Change vs {baseline_month}",
         template="plotly_white",
         barmode="relative",
         bargap=0.28,
@@ -178,7 +178,7 @@ def create_daily_month_comparison_figure(
         )
 
     fig.update_layout(
-        title=f"Daily Spend Comparison (Last {month_count} Month{'s' if month_count != 1 else ''})",
+        title=f"Daily Spending Comparison (Last {month_count} Month{'s' if month_count != 1 else ''})",
         template="plotly_white",
         legend_title_text="Month",
         xaxis_title="Day of Month",
